@@ -1,0 +1,58 @@
+name: Docker 镜像 CI/CD (推送到 GHCR)
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build_and_push_ghcr:
+    runs-on: ubuntu-latest
+
+    # 启用权限：contents: read 用于代码检出，packages: write 用于推送镜像到 GHCR
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: ⬇️ 检出代码 (Checkout repository)
+        uses: actions/checkout@v4
+
+      # --- 🛠️ 设置 Docker Buildx ---
+      - name: 🛠️ 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # --- 🔑 登录到 GitHub Container Registry (GHCR) ---
+      - name: 🔑 登录到 GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          # 使用内置的 GITHUB_TOKEN 作为密码
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # --- 🏷️ 定义镜像标签和元数据 ---
+      - name: 🏷️ 提取 Docker 元数据 (标签, 标签)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # 格式为 ghcr.io/用户名/仓库名
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            # 默认标签：使用 git commit 的长 SHA
+            type=sha,format=long,prefix=
+            # 如果是 main 分支，添加 latest 标签
+            type=raw,value=latest,enable={{ github.ref == 'refs/heads/main' }}
+
+      # --- 📦 构建并推送镜像 ---
+      - name: 📦 构建并推送 Docker 镜像到 GHCR
+        uses: docker/build-and-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile # 确保您的 Dockerfile 在根目录下
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha # 开启 GitHub Actions 缓存
+          cache-to: type=gha,mode=max
