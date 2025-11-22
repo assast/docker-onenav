@@ -1,16 +1,18 @@
-name: Docker 镜像 CI/CD (推送到 GHCR)
+name: Docker Image 发布到 GHCR
 
 on:
   push:
+    # 仅在推送到 main 分支时触发构建和推送
     branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+
+  # 也支持手动触发，方便测试
+  workflow_dispatch:
 
 jobs:
   build_and_push_ghcr:
     runs-on: ubuntu-latest
 
-    # 启用权限：contents: read 用于代码检出，packages: write 用于推送镜像到 GHCR
+    # 【重要配置】设置权限：读取代码，写入 GitHub Packages (GHCR)
     permissions:
       contents: read
       packages: write
@@ -19,40 +21,45 @@ jobs:
       - name: ⬇️ 检出代码 (Checkout repository)
         uses: actions/checkout@v4
 
-      # --- 🛠️ 设置 Docker Buildx ---
-      - name: 🛠️ 设置 Docker Buildx
+      # --- 1. 设置构建环境 ---
+      - name: 🛠️ 设置 Docker Buildx (支持多平台构建和缓存)
         uses: docker/setup-buildx-action@v3
 
-      # --- 🔑 登录到 GitHub Container Registry (GHCR) ---
-      - name: 🔑 登录到 GHCR
+      # --- 2. 登录到 GHCR ---
+      - name: 🔑 登录到 GitHub Container Registry (GHCR)
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          # 使用内置的 GITHUB_TOKEN 作为密码
+          # 使用 GitHub 提供的内置 Token
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # --- 🏷️ 定义镜像标签和元数据 ---
+      # --- 3. 定义标签和元数据 ---
       - name: 🏷️ 提取 Docker 元数据 (标签, 标签)
         id: meta
         uses: docker/metadata-action@v5
         with:
-          # 格式为 ghcr.io/用户名/仓库名
+          # 镜像名称格式：ghcr.io/用户名/仓库名
           images: ghcr.io/${{ github.repository }}
           tags: |
-            # 默认标签：使用 git commit 的长 SHA
+            # 使用 git commit 的长 SHA 作为唯一标签
             type=sha,format=long,prefix=
             # 如果是 main 分支，添加 latest 标签
-            type=raw,value=latest,enable={{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
-      # --- 📦 构建并推送镜像 ---
+      # --- 4. 构建并推送 ---
       - name: 📦 构建并推送 Docker 镜像到 GHCR
-        uses: docker/build-and-push-action@v5
+        # 【关键修正】这里移除了 '-and-'：使用 docker/build-push-action
+        uses: docker/build-push-action@v5
         with:
+          # 上下文路径，默认为仓库根目录
           context: .
-          file: ./Dockerfile # 确保您的 Dockerfile 在根目录下
+          # Dockerfile 文件路径，默认为 ./Dockerfile
+          file: ./Dockerfile
+          # 开启推送
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha # 开启 GitHub Actions 缓存
+          # 开启构建缓存，加速后续构建
+          cache-from: type=gha
           cache-to: type=gha,mode=max
